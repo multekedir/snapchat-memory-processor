@@ -1,0 +1,8 @@
+# Snapchat Memories Processor Requirements
+# Python packages needed for processing Snapchat memories
+
+opencv-python>=4.5.0
+Pillow>=8.0.0
+piexif>=1.1.3
+numpy>=1.19.0
+
