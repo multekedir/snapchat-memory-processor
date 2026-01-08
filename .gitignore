@@ -15,8 +15,7 @@ ENV/
 *.download_progress.json
 
 # User data files
-memories_history.json
-memories_history_metadata.json
+*.json
 memories_history.html
 
 # Media files
