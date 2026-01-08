@@ -14,9 +14,20 @@ ENV/
 *_processed/
 *.download_progress.json
 
-# User data files (uncomment if you don't want to commit these)
-# memories_history.html
-# memories_history_metadata.json
+# User data files
+memories_history.json
+memories_history_metadata.json
+memories_history.html
+
+# Media files
+*.mp4
+*.jpg
+*.jpeg
+*.png
+*.bin
+*.mov
+*.avi
+*.mkv
 
 # IDE
 .vscode/

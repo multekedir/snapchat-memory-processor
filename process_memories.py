@@ -137,6 +137,15 @@ def extract_metadata_from_json(json_file, output_json):
     with open(json_file, 'r', encoding='utf-8') as f:
         raw_data = json.load(f)
     
+    # Handle both direct array and wrapped dictionary formats
+    if isinstance(raw_data, dict):
+        # Check if it's wrapped in a 'Saved Media' key
+        if 'Saved Media' in raw_data:
+            raw_data = raw_data['Saved Media']
+        else:
+            logger.error("❌ JSON file must contain an array or a dict with 'Saved Media' key!")
+            return None
+    
     if not isinstance(raw_data, list):
         logger.error("❌ JSON file must contain an array of memory objects!")
         return None
@@ -808,7 +817,7 @@ class MemoryProcessor:
                 shutil.rmtree(extract_folder)
     
     def _apply_overlay_to_video(self, media_file, overlay_file, output_path):
-        """Apply overlay to video"""
+        """Apply overlay to video while preserving audio"""
         temp_output = self.temp_folder / f"{output_path.stem}_temp.mp4"
         
         cap = cv2.VideoCapture(str(media_file))
@@ -880,14 +889,36 @@ class MemoryProcessor:
         cap.release()
         out.release()
         
-        # Re-encode
+        # Re-encode: Merge processed video with original audio from source
+        # FIXED: Added logic to map audio from original file
         cmd = [
-            'ffmpeg', '-i', str(temp_output),
-            '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
-            '-c:a', 'copy', '-movflags', '+faststart',
+            'ffmpeg', 
+            '-i', str(temp_output),   # Input 0: Processed silent video
+            '-i', str(media_file),    # Input 1: Original video with audio
+            
+            '-map', '0:v',            # Use video stream from Input 0
+            '-map', '1:a?',           # Use audio stream from Input 1 (optional '?' prevents crash if no audio)
+            
+            '-c:v', 'libx264',        # Re-encode video
+            '-preset', 'medium', '-crf', '23',
+            
+            '-c:a', 'copy',           # Copy audio stream without re-encoding
+            '-movflags', '+faststart',
             '-y', str(output_path)
         ]
-        subprocess.run(cmd, capture_output=True)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        # Fallback: If audio merge fails (rare), save video only
+        if result.returncode != 0:
+            logger.warning(f"      ⚠️  Audio merge failed, saving video only. Error: {result.stderr[:100]}")
+            cmd_fallback = [
+                'ffmpeg', '-i', str(temp_output),
+                '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
+                '-y', str(output_path)
+            ]
+            subprocess.run(cmd_fallback, capture_output=True)
+
         if temp_output.exists():
             temp_output.unlink()
     
