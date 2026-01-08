@@ -12,18 +12,30 @@ Complete tool for downloading, processing, and preserving Snapchat memories with
 - **Text Enhancement**: Automatically improves overlay text readability on videos
 - **Process-Only Mode**: Skip download phase and process already downloaded files
 
-## 📋 Requirements
+## 📦 Installation
 
 ```bash
-# Python packages
-pip install opencv-python Pillow piexif
+# Clone or download the repository
+git clone https://github.com/multekedir/snapchat-memory-processor.git
+cd snapchat-memory-processor
 
-# System tools (macOS)
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install system dependencies (macOS)
 brew install ffmpeg
 
-# System tools (Ubuntu/Debian)
+# Install system dependencies (Ubuntu/Debian)
 sudo apt-get install ffmpeg
 ```
+
+## 📋 Requirements
+
+- Python 3.6+
+- Python packages: `opencv-python`, `Pillow`, `piexif`, `numpy`
+- System tools: `ffmpeg`
+
+See `requirements.txt` for Python package versions.
 
 ## 🚀 Quick Start
 

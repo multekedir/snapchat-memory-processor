@@ -16,15 +16,44 @@ import subprocess
 import shutil
 import json
 import numpy as np
+import logging
 from pathlib import Path
 from html.parser import HTMLParser
 from datetime import datetime
 from PIL import Image
 import piexif
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
 
 class MemoryHTMLParser(HTMLParser):
-    """Parse HTML to extract download URLs, dates, locations, and media types"""
+    """
+    HTML parser to extract Snapchat memory metadata from HTML table format.
+    
+    Parses the Snapchat memories history HTML file to extract:
+    - Download URLs (from onclick attributes)
+    - Dates (from table cells in YYYY-MM-DD HH:MM:SS UTC format)
+    - Media types (Image/Video)
+    - GPS coordinates (latitude, longitude)
+    
+    Attributes:
+        memories (list): List of extracted memory dictionaries
+        current_row (dict): Temporary storage for current table row being parsed
+        in_table_row (bool): Flag indicating if currently inside a table row
+        in_table_cell (bool): Flag indicating if currently inside a table cell
+        cell_index (int): Index of current table cell (0=date, 1=type, 2=location)
+    
+    Example:
+        parser = MemoryHTMLParser()
+        parser.feed(html_content)
+        memories = parser.memories  # List of parsed memory objects
+    """
     def __init__(self):
         super().__init__()
         self.memories = []
@@ -101,19 +130,19 @@ def extract_metadata_from_json(json_file, output_json):
     PHASE 1: Extract all metadata from JSON and save to standardized JSON
     This preserves metadata even if download/processing fails
     """
-    print("\n" + "=" * 80)
-    print("PHASE 1: EXTRACTING METADATA FROM JSON")
-    print("=" * 80)
+    logger.info("\n" + "=" * 80)
+    logger.info("PHASE 1: EXTRACTING METADATA FROM JSON")
+    logger.info("=" * 80)
     
     with open(json_file, 'r', encoding='utf-8') as f:
         raw_data = json.load(f)
     
     if not isinstance(raw_data, list):
-        print("❌ JSON file must contain an array of memory objects!")
+        logger.error("❌ JSON file must contain an array of memory objects!")
         return None
     
     if not raw_data:
-        print("❌ No memories found in JSON file!")
+        logger.error("❌ No memories found in JSON file!")
         return None
     
     memories = []
@@ -129,7 +158,7 @@ def extract_metadata_from_json(json_file, output_json):
                 memory['date_utc'] = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
                 memory['date_key'] = dt.strftime('%Y-%m-%d_%H-%M-%S')
             except ValueError:
-                print(f"⚠️  Could not parse date: {date_str}")
+                logger.warning(f"⚠️  Could not parse date: {date_str}")
                 continue
         else:
             continue
@@ -167,10 +196,10 @@ def extract_metadata_from_json(json_file, output_json):
         memories.append(memory)
     
     if not memories:
-        print("❌ No valid memories found in JSON file!")
+        logger.error("❌ No valid memories found in JSON file!")
         return None
     
-    print(f"✓ Found {len(memories)} memories")
+    logger.info(f"✓ Found {len(memories)} memories")
     
     # Enrich with filenames (same as HTML version)
     for i, memory in enumerate(memories, 1):
@@ -194,7 +223,7 @@ def extract_metadata_from_json(json_file, output_json):
         else:
             loc_str = "No GPS (0.0, 0.0)"
         
-        print(f"  [{i:3d}] {memory['date_key']} | {media_type:5s} | {loc_str}")
+        logger.info(f"  [{i:3d}] {memory['date_key']} | {media_type:5s} | {loc_str}")
     
     # Save to JSON (same format as HTML version)
     metadata = {
@@ -207,7 +236,7 @@ def extract_metadata_from_json(json_file, output_json):
     with open(output_json, 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    print(f"\n✓ Metadata saved to: {output_json}")
+    logger.info(f"\n✓ Metadata saved to: {output_json}")
     
     # Calculate statistics (same as HTML version)
     total = len(memories)
@@ -233,31 +262,30 @@ def extract_metadata_from_json(json_file, output_json):
     else:
         first_date = last_date = "Unknown"
     
-    print("\n" + "=" * 80)
-    print("METADATA SUMMARY")
-    print("=" * 80)
-    print(f"📊 Total memories: {total}")
-    print(f"   └─ Videos: {videos}")
-    print(f"   └─ Images: {images}")
-    print()
-    print(f"📍 GPS Coverage:")
-    print(f"   └─ With GPS: {with_gps} ({with_gps/total*100:.1f}%)")
-    print(f"   └─ Without GPS (0.0, 0.0): {without_gps} ({without_gps/total*100:.1f}%)")
-    print()
-    print(f"📅 Date Range:")
-    print(f"   └─ First: {first_date}")
-    print(f"   └─ Last:  {last_date}")
-    print(f"   └─ Unique dates: {len(dates)}")
-    print()
-    
+    logger.info("\n" + "=" * 80)
+    logger.info("METADATA SUMMARY")
+    logger.info("=" * 80)
+    logger.info(f"📊 Total memories: {total}")
+    logger.info(f"   └─ Videos: {videos}")
+    logger.info(f"   └─ Images: {images}")
+    logger.info("")
+    logger.info(f"📍 GPS Coverage:")
+    logger.info(f"   └─ With GPS: {with_gps} ({with_gps/total*100:.1f}%)")
+    logger.info(f"   └─ Without GPS (0.0, 0.0): {without_gps} ({without_gps/total*100:.1f}%)")
+    logger.info("")
+    logger.info(f"📅 Date Range:")
+    logger.info(f"   └─ First: {first_date}")
+    logger.info(f"   └─ Last:  {last_date}")
+    logger.info(f"   └─ Unique dates: {len(dates)}")
+    logger.info("")
     # Show top 5 dates with most memories
     if dates:
         top_dates = sorted(dates.items(), key=lambda x: x[1], reverse=True)[:5]
-        print(f"📈 Most active dates:")
+        logger.info(f"📈 Most active dates:")
         for date, count in top_dates:
-            print(f"   └─ {date}: {count} memories")
+            logger.info(f"   └─ {date}: {count} memories")
     
-    print("\n" + "=" * 80)
+    logger.info("\n" + "=" * 80)
     
     return metadata
 
@@ -267,9 +295,9 @@ def extract_metadata_from_html(html_file, output_json):
     PHASE 1: Extract all metadata from HTML and save to JSON
     This preserves metadata even if download/processing fails
     """
-    print("\n" + "=" * 80)
-    print("PHASE 1: EXTRACTING METADATA FROM HTML")
-    print("=" * 80)
+    logger.info("\n" + "=" * 80)
+    logger.info("PHASE 1: EXTRACTING METADATA FROM HTML")
+    logger.info("=" * 80)
     
     with open(html_file, 'r', encoding='utf-8') as f:
         content = f.read()
@@ -278,10 +306,10 @@ def extract_metadata_from_html(html_file, output_json):
     parser.feed(content)
     
     if not parser.memories:
-        print("❌ No memories found in HTML file!")
+        logger.error("❌ No memories found in HTML file!")
         return None
     
-    print(f"✓ Found {len(parser.memories)} memories")
+    logger.info(f"✓ Found {len(parser.memories)} memories")
     
     # Enrich with filenames
     for i, memory in enumerate(parser.memories, 1):
@@ -305,7 +333,7 @@ def extract_metadata_from_html(html_file, output_json):
         else:
             loc_str = "No GPS (0.0, 0.0)"
         
-        print(f"  [{i:3d}] {memory['date_key']} | {media_type:5s} | {loc_str}")
+        logger.info(f"  [{i:3d}] {memory['date_key']} | {media_type:5s} | {loc_str}")
     
     # Save to JSON
     metadata = {
@@ -318,7 +346,7 @@ def extract_metadata_from_html(html_file, output_json):
     with open(output_json, 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    print(f"\n✓ Metadata saved to: {output_json}")
+    logger.info(f"\n✓ Metadata saved to: {output_json}")
     
     # Calculate statistics
     total = len(parser.memories)
@@ -344,38 +372,65 @@ def extract_metadata_from_html(html_file, output_json):
     else:
         first_date = last_date = "Unknown"
     
-    print("\n" + "=" * 80)
-    print("METADATA SUMMARY")
-    print("=" * 80)
-    print(f"📊 Total memories: {total}")
-    print(f"   └─ Videos: {videos}")
-    print(f"   └─ Images: {images}")
-    print()
-    print(f"📍 GPS Coverage:")
-    print(f"   └─ With GPS: {with_gps} ({with_gps/total*100:.1f}%)")
-    print(f"   └─ Without GPS (0.0, 0.0): {without_gps} ({without_gps/total*100:.1f}%)")
-    print()
-    print(f"📅 Date Range:")
-    print(f"   └─ First: {first_date}")
-    print(f"   └─ Last:  {last_date}")
-    print(f"   └─ Unique dates: {len(dates)}")
-    print()
-    
+    logger.info("\n" + "=" * 80)
+    logger.info("METADATA SUMMARY")
+    logger.info("=" * 80)
+    logger.info(f"📊 Total memories: {total}")
+    logger.info(f"   └─ Videos: {videos}")
+    logger.info(f"   └─ Images: {images}")
+    logger.info("")
+    logger.info(f"📍 GPS Coverage:")
+    logger.info(f"   └─ With GPS: {with_gps} ({with_gps/total*100:.1f}%)")
+    logger.info(f"   └─ Without GPS (0.0, 0.0): {without_gps} ({without_gps/total*100:.1f}%)")
+    logger.info("")
+    logger.info(f"📅 Date Range:")
+    logger.info(f"   └─ First: {first_date}")
+    logger.info(f"   └─ Last:  {last_date}")
+    logger.info(f"   └─ Unique dates: {len(dates)}")
+    logger.info("")
     # Show top 5 dates with most memories
     if dates:
         top_dates = sorted(dates.items(), key=lambda x: x[1], reverse=True)[:5]
-        print(f"📈 Most active dates:")
+        logger.info(f"📈 Most active dates:")
         for date, count in top_dates:
-            print(f"   └─ {date}: {count} memories")
+            logger.info(f"   └─ {date}: {count} memories")
     
-    print("\n" + "=" * 80)
+    logger.info("\n" + "=" * 80)
     
     return metadata
 
 
 class MemoryDownloader:
     """
-    PHASE 2: Download files using metadata from JSON
+    Phase 2: Downloads media files from Snapchat URLs using extracted metadata.
+    
+    Handles the downloading phase of the 3-phase architecture:
+    1. Loads metadata from standardized JSON format
+    2. Downloads files with retry logic and rate limiting
+    3. Tracks progress to enable resume functionality
+    4. Automatically determines file extensions from content-type
+    
+    Features:
+    - Resume support: Tracks downloaded files in .download_progress.json
+    - Retry logic: Up to 3 attempts with exponential backoff
+    - Rate limiting: Configurable delay between downloads
+    - Automatic extension detection: Based on Content-Type headers
+    
+    Args:
+        metadata (dict): Metadata dictionary containing 'memories' list
+        download_folder (str|Path): Directory to save downloaded files
+        delay (float): Delay in seconds between downloads (default: 2)
+    
+    Attributes:
+        metadata (dict): The metadata dictionary being used
+        download_folder (Path): Path to download directory
+        delay (float): Delay between downloads
+        progress_file (Path): Path to .download_progress.json
+        downloaded (set): Set of URLs that have been downloaded
+    
+    Example:
+        downloader = MemoryDownloader(metadata, './downloads', delay=2)
+        success, failed = downloader.download_all()
     """
     def __init__(self, metadata, download_folder, delay=2):
         self.metadata = metadata
@@ -434,19 +489,19 @@ class MemoryDownloader:
             except Exception as e:
                 if attempt < max_retries - 1:
                     wait_time = self.delay * (attempt + 1)
-                    print(f"      ⚠️  Attempt {attempt + 1} failed, retrying in {wait_time}s...")
+                    logger.warning(f"      ⚠️  Attempt {attempt + 1} failed, retrying in {wait_time}s...")
                     time.sleep(wait_time)
                 else:
-                    print(f"      ✗ All {max_retries} attempts failed: {e}")
+                    logger.error(f"      ✗ All {max_retries} attempts failed: {e}")
                     return False, None
         
         return False, None
     
     def download_all(self):
         """Download all files from metadata"""
-        print("\n" + "=" * 80)
-        print("PHASE 2: DOWNLOADING FILES")
-        print("=" * 80)
+        logger.info("\n" + "=" * 80)
+        logger.info("PHASE 2: DOWNLOADING FILES")
+        logger.info("=" * 80)
         
         memories = self.metadata['memories']
         success_count = 0
@@ -458,11 +513,11 @@ class MemoryDownloader:
             filename = memory['filename']
             index = memory['index']
             
-            print(f"\n[{index}/{len(memories)}] {filename}")
+            logger.info(f"\n[{index}/{len(memories)}] {filename}")
             
             # Check if already downloaded
             if url in self.downloaded:
-                print(f"  ⏭️  Already downloaded")
+                logger.info(f"  ⏭️  Already downloaded")
                 skipped_count += 1
                 continue
             
@@ -470,40 +525,76 @@ class MemoryDownloader:
             download_path = self.download_folder / filename
             is_get = memory.get('is_get_request', True)
             
-            print(f"  ⬇️  Downloading...")
+            logger.info(f"  ⬇️  Downloading...")
             success, file_path = self.download_file(url, download_path, is_get)
             
             if success:
-                print(f"  ✓ Saved: {file_path.name}")
+                logger.info(f"  ✓ Saved: {file_path.name}")
                 self.save_progress(url)
                 success_count += 1
                 
                 # Update metadata with actual filename
                 memory['downloaded_file'] = str(file_path.relative_to(self.download_folder))
             else:
-                print(f"  ✗ Download failed")
+                logger.error(f"  ✗ Download failed")
                 failed_count += 1
         
-        print("\n" + "=" * 80)
-        print("DOWNLOAD SUMMARY")
-        print("=" * 80)
-        print(f"✓ Downloaded: {success_count}")
-        print(f"⏭️  Skipped: {skipped_count}")
-        print(f"✗ Failed: {failed_count}")
-        print(f"Total: {len(memories)}")
+        logger.info("\n" + "=" * 80)
+        logger.info("DOWNLOAD SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"✓ Downloaded: {success_count}")
+        logger.info(f"⏭️  Skipped: {skipped_count}")
+        logger.error(f"✗ Failed: {failed_count}")
+        logger.info(f"Total: {len(memories)}")
         
         # Update metadata file
         metadata_file = self.download_folder / "metadata.json"
         with open(metadata_file, 'w') as f:
             json.dump(self.metadata, f, indent=2)
-        print(f"\n✓ Updated metadata: {metadata_file}")
+        logger.info(f"\n✓ Updated metadata: {metadata_file}")
         
         return success_count, failed_count
 
 
 class MemoryProcessor:
     """
-    PHASE 3: Process downloaded files and apply metadata from JSON
+    Phase 3: Processes downloaded files and embeds metadata from JSON.
+    
+    Handles the processing phase of the 3-phase architecture:
+    1. Extracts .bin files (ZIP archives containing media + overlays)
+    2. Applies overlay images/text to videos and images
+    3. Embeds EXIF metadata (date, GPS) into images
+    4. Embeds video metadata (creation time, GPS) into videos
+    5. Handles text overlay enhancement for better readability
+    
+    Features:
+    - .bin file extraction: Automatically extracts ZIP archives
+    - Overlay application: Applies PNG overlays to media with shadow effects
+    - GPS validation: Skips invalid (0.0, 0.0) coordinates
+    - Text enhancement: Improves overlay text opacity and adds shadows
+    - Multiple matching strategies: Flexible filename-to-metadata matching
+    
+    Args:
+        metadata_file (str|Path): Path to standardized metadata JSON file
+        download_folder (str|Path): Directory containing downloaded files
+        output_folder (str|Path): Directory for processed output files
+    
+    Attributes:
+        download_folder (Path): Path to download directory
+        output_folder (Path): Path to output directory
+        temp_folder (Path): Temporary directory for .bin extraction
+        metadata (dict): Loaded metadata dictionary
+        metadata_lookup (dict): Primary filename-to-metadata mapping
+        metadata_by_date (dict): Fallback date-key-to-metadata mapping
+        metadata_by_index (dict): Fallback index-to-metadata mapping
+    
+    Example:
+        processor = MemoryProcessor(
+            'metadata.json',
+            './downloads',
+            './processed'
+        )
+        processor.process_all()
     """
     def __init__(self, metadata_file, download_folder, output_folder):
         self.download_folder = Path(download_folder)
@@ -559,9 +650,9 @@ class MemoryProcessor:
                     dt = datetime.fromisoformat(date_str_raw)
                     date_str = dt.strftime("%Y:%m:%d %H:%M:%S")
                     exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = date_str
-                    print(f"      ✓ Date: {date_str}")
+                    logger.info(f"      ✓ Date: {date_str}")
                 except Exception as e:
-                    print(f"      ⚠️  Date error: {e}")
+                    logger.warning(f"      ⚠️  Date error: {e}")
             
             # Apply GPS (skip if 0.0, 0.0)
             if 'location' in metadata:
@@ -581,15 +672,15 @@ class MemoryProcessor:
                     exif_dict["GPS"][piexif.GPSIFD.GPSLatitudeRef] = 'N' if lat >= 0 else 'S'
                     exif_dict["GPS"][piexif.GPSIFD.GPSLongitude] = to_degrees(lon)
                     exif_dict["GPS"][piexif.GPSIFD.GPSLongitudeRef] = 'E' if lon >= 0 else 'W'
-                    print(f"      ✓ GPS: {lat}, {lon}")
+                    logger.info(f"      ✓ GPS: {lat}, {lon}")
                 else:
-                    print(f"      ⚠️  Skipped GPS (0.0, 0.0)")
+                    logger.warning(f"      ⚠️  Skipped GPS (0.0, 0.0)")
             
             exif_bytes = piexif.dump(exif_dict)
             piexif.insert(exif_bytes, str(image_path))
             
         except Exception as e:
-            print(f"      ⚠️  Metadata error: {e}")
+            logger.warning(f"      ⚠️  Metadata error: {e}")
     
     def apply_metadata_to_video(self, video_path, metadata):
         """Apply date and GPS metadata to video"""
@@ -604,9 +695,9 @@ class MemoryProcessor:
                 try:
                     date_str = metadata['date_utc']
                     metadata_args.extend(['-metadata', f'creation_time={date_str}'])
-                    print(f"      ✓ Date: {date_str}")
+                    logger.info(f"      ✓ Date: {date_str}")
                 except Exception as e:
-                    print(f"      ⚠️  Date error: {e}")
+                    logger.warning(f"      ⚠️  Date error: {e}")
             
             # Apply GPS (skip if 0.0, 0.0)
             if 'location' in metadata:
@@ -618,9 +709,9 @@ class MemoryProcessor:
                         '-metadata', f'location={lat},{lon}',
                         '-metadata', f'location-eng={lat},{lon}'
                     ])
-                    print(f"      ✓ GPS: {lat}, {lon}")
+                    logger.info(f"      ✓ GPS: {lat}, {lon}")
                 else:
-                    print(f"      ⚠️  Skipped GPS (0.0, 0.0)")
+                    logger.warning(f"      ⚠️  Skipped GPS (0.0, 0.0)")
             
             if metadata_args:
                 temp_path = video_path.parent / f"temp_{video_path.name}"
@@ -635,16 +726,16 @@ class MemoryProcessor:
                 if result.returncode == 0:
                     shutil.move(str(temp_path), str(video_path))
                 else:
-                    print(f"      ⚠️  FFmpeg error: {result.stderr[:100]}")
+                    logger.warning(f"      ⚠️  FFmpeg error: {result.stderr[:100]}")
                     if temp_path.exists():
                         temp_path.unlink()
                         
         except Exception as e:
-            print(f"      ⚠️  Metadata error: {e}")
+            logger.warning(f"      ⚠️  Metadata error: {e}")
     
     def process_bin_file(self, bin_path, metadata):
         """Extract .bin, apply overlay, apply metadata"""
-        print(f"    📦 Extracting BIN file...")
+        logger.info(f"    📦 Extracting BIN file...")
         
         extract_folder = None
         try:
@@ -672,12 +763,12 @@ class MemoryProcessor:
                     overlay_file = file
             
             if not media_file:
-                print(f"      ⚠️  No media found")
+                logger.warning(f"      ⚠️  No media found")
                 return False
             
             # Apply overlay if exists
             if overlay_file:
-                print(f"    🎨 Applying overlay...")
+                logger.info(f"    🎨 Applying overlay...")
                 
                 if media_type == 'image':
                     base_img = Image.open(media_file).convert('RGBA')
@@ -698,10 +789,10 @@ class MemoryProcessor:
                     output_path = self.output_folder / f"{bin_path.stem}.mp4"
                 shutil.copy2(media_file, output_path)
             
-            print(f"    ✓ Saved: {output_path.name}")
+            logger.info(f"    ✓ Saved: {output_path.name}")
             
             # Apply metadata
-            print(f"    📝 Applying metadata from JSON...")
+            logger.info(f"    📝 Applying metadata from JSON...")
             if media_type == 'image':
                 self.apply_metadata_to_image(output_path, metadata)
             else:
@@ -710,7 +801,7 @@ class MemoryProcessor:
             return True
             
         except Exception as e:
-            print(f"      ❌ Error: {e}")
+            logger.error(f"      ❌ Error: {e}")
             return False
         finally:
             if extract_folder and extract_folder.exists():
@@ -737,6 +828,7 @@ class MemoryProcessor:
         
         # Enhance alpha channel to make overlay more solid
         shadow_overlay = None
+        shadow_shifted = None
         if len(overlay_img.shape) == 3 and overlay_img.shape[2] == 4:
             alpha_channel = overlay_img[:, :, 3]
             
@@ -746,6 +838,10 @@ class MemoryProcessor:
             shadow_overlay[:, :, :3] = 0
             # Black shadow 2 pixels down and right - provides contrast against any background
             shadow_overlay[:, :, 3] = (alpha_channel * 0.6).astype('uint8')
+            
+            # Pre-shift shadow 2 pixels down and right for simpler blending
+            shadow_shifted = np.zeros_like(overlay_img)
+            shadow_shifted[2:, 2:] = shadow_overlay[:-2, :-2]
             
             # Makes the text more solid
             alpha_channel = np.clip(alpha_channel * 1.3, 0, 255).astype('uint8')
@@ -760,27 +856,24 @@ class MemoryProcessor:
                 break
             
             if len(overlay_img.shape) == 3 and overlay_img.shape[2] == 4:
-                # First apply shadow (offset by 2 pixels)
-                if shadow_overlay is not None:
-                    shadow_alpha = shadow_overlay[:, :, 3] / 255.0
-                    # Apply shadow to frame with offset
-                    h, w = frame.shape[:2]
-                    sh, sw = shadow_overlay.shape[:2]
-                    # Calculate valid region for shadow (accounting for 2px offset)
-                    valid_h = min(h - 2, sh)
-                    valid_w = min(w - 2, sw)
-                    for c in range(3):
-                        blended = shadow_alpha[:valid_h, :valid_w] * shadow_overlay[:valid_h, :valid_w, c] + \
-                                 (1 - shadow_alpha[:valid_h, :valid_w]) * frame[2:2+valid_h, 2:2+valid_w, c]
-                        # Clip to valid range (0-255) to prevent overflow warnings
-                        frame[2:2+valid_h, 2:2+valid_w, c] = np.clip(blended, 0, 255).astype('uint8')
+                # First apply shadow (pre-shifted for simpler blending)
+                if shadow_shifted is not None:
+                    shadow_alpha = shadow_shifted[:, :, 3] / 255.0
+                    shadow_alpha = shadow_alpha[:, :, None]  # Add channel dimension
+                    shadow_rgb = shadow_shifted[:, :, :3].astype(float)
+                    frame_float = frame.astype(float)
+                    
+                    frame = (shadow_alpha * shadow_rgb + (1 - shadow_alpha) * frame_float).clip(0, 255).astype('uint8')
                 
-                # Then apply main overlay
+                # Then apply main overlay with proper broadcasting
                 alpha = overlay_img[:, :, 3] / 255.0
-                for c in range(3):
-                    blended = alpha * overlay_img[:, :, c] + (1 - alpha) * frame[:, :, c]
-                    # Clip to valid range (0-255) to prevent overflow warnings
-                    frame[:, :, c] = np.clip(blended, 0, 255).astype('uint8')
+                alpha = alpha[:, :, None]  # Add channel dimension
+                
+                overlay_rgb = overlay_img[:, :, :3].astype(float)
+                frame_float = frame.astype(float)
+                
+                blended = alpha * overlay_rgb + (1 - alpha) * frame_float
+                frame = blended.clip(0, 255).astype('uint8')
             
             out.write(frame)
         
@@ -800,9 +893,9 @@ class MemoryProcessor:
     
     def process_all(self):
         """Process all downloaded files"""
-        print("\n" + "=" * 80)
-        print("PHASE 3: PROCESSING FILES AND APPLYING METADATA")
-        print("=" * 80)
+        logger.info("\n" + "=" * 80)
+        logger.info("PHASE 3: PROCESSING FILES AND APPLYING METADATA")
+        logger.info("=" * 80)
         
         success_count = 0
         failed_count = 0
@@ -828,22 +921,22 @@ class MemoryProcessor:
                         metadata = self.metadata_by_index.get(index)
                 
                 if not metadata:
-                    print(f"\n⚠️  {file_path.name}: No metadata found, skipping")
+                    logger.warning(f"\n⚠️  {file_path.name}: No metadata found, skipping")
                     continue
                 
                 index = metadata['index']
                 total = len(self.metadata['memories'])
-                print(f"\n[{index}/{total}] {file_path.name}")
+                logger.info(f"\n[{index}/{total}] {file_path.name}")
                 
                 # Show metadata being applied
                 if 'location' in metadata and metadata['location'].get('valid'):
                     loc = metadata['location']
-                    print(f"  📍 GPS: {loc['latitude']}, {loc['longitude']}")
+                    logger.info(f"  📍 GPS: {loc['latitude']}, {loc['longitude']}")
                 else:
-                    print(f"  📍 No valid GPS")
+                    logger.info(f"  📍 No valid GPS")
                 
                 if 'date_utc' in metadata:
-                    print(f"  📅 Date: {metadata['date_utc']}")
+                    logger.info(f"  📅 Date: {metadata['date_utc']}")
                 
                 # Process based on file type
                 if file_path.suffix.lower() == '.bin':
@@ -855,10 +948,10 @@ class MemoryProcessor:
                     # Copy to output
                     output_path = self.output_folder / file_path.name
                     shutil.copy2(file_path, output_path)
-                    print(f"    ✓ Copied to output")
+                    logger.info(f"    ✓ Copied to output")
                     
                     # Apply metadata
-                    print(f"    📝 Applying metadata from JSON...")
+                    logger.info(f"    📝 Applying metadata from JSON...")
                     if file_path.suffix.lower() in ['.jpg', '.jpeg']:
                         self.apply_metadata_to_image(output_path, metadata)
                     elif file_path.suffix.lower() == '.mp4':
@@ -870,41 +963,41 @@ class MemoryProcessor:
         if self.temp_folder.exists():
             shutil.rmtree(self.temp_folder)
         
-        print("\n" + "=" * 80)
-        print("PROCESSING SUMMARY")
-        print("=" * 80)
-        print(f"✓ Processed: {success_count}")
-        print(f"✗ Failed: {failed_count}")
-        print(f"\n✓ Output folder: {self.output_folder.absolute()}")
+        logger.info("\n" + "=" * 80)
+        logger.info("PROCESSING SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"✓ Processed: {success_count}")
+        logger.error(f"✗ Failed: {failed_count}")
+        logger.info(f"\n✓ Output folder: {self.output_folder.absolute()}")
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage:")
-        print("  python3 process_memories.py <input_file> [options]")
-        print("  python3 process_memories.py --process-only [metadata_file]")
-        print("\nInput file can be:")
-        print("  - memories_history.html (HTML format from Snapchat)")
-        print("  - memories_history.json (JSON format from Snapchat)")
-        print("\nOptions:")
-        print("  --dry-run           Extract metadata only (no download/processing)")
-        print("  --process-only      Process already downloaded files (skip download)")
-        print("  --delay SECONDS     Delay between downloads (default: 2)")
-        print("\nExamples:")
-        print("  # Dry run - extract metadata only from HTML:")
-        print("  python3 process_memories.py memories_history.html --dry-run")
-        print()
-        print("  # Dry run - extract metadata only from JSON:")
-        print("  python3 process_memories.py memories_history.json --dry-run")
-        print()
-        print("  # Full run with 3 second delay:")
-        print("  python3 process_memories.py memories_history.html --delay 3")
-        print()
-        print("  # Process-only (skip download, use existing files):")
-        print("  python3 process_memories.py --process-only memories_history_metadata.json")
-        print()
-        print("  # Process-only (auto-detect metadata file from input file):")
-        print("  python3 process_memories.py --process-only memories_history.html")
+        logger.info("Usage:")
+        logger.info("  python3 process_memories.py <input_file> [options]")
+        logger.info("  python3 process_memories.py --process-only [metadata_file]")
+        logger.info("\nInput file can be:")
+        logger.info("  - memories_history.html (HTML format from Snapchat)")
+        logger.info("  - memories_history.json (JSON format from Snapchat)")
+        logger.info("\nOptions:")
+        logger.info("  --dry-run           Extract metadata only (no download/processing)")
+        logger.info("  --process-only      Process already downloaded files (skip download)")
+        logger.info("  --delay SECONDS     Delay between downloads (default: 2)")
+        logger.info("\nExamples:")
+        logger.info("  # Dry run - extract metadata only from HTML:")
+        logger.info("  python3 process_memories.py memories_history.html --dry-run")
+        logger.info("")
+        logger.info("  # Dry run - extract metadata only from JSON:")
+        logger.info("  python3 process_memories.py memories_history.json --dry-run")
+        logger.info("")
+        logger.info("  # Full run with 3 second delay:")
+        logger.info("  python3 process_memories.py memories_history.html --delay 3")
+        logger.info("")
+        logger.info("  # Process-only (skip download, use existing files):")
+        logger.info("  python3 process_memories.py --process-only memories_history_metadata.json")
+        logger.info("")
+        logger.info("  # Process-only (auto-detect metadata file from input file):")
+        logger.info("  python3 process_memories.py --process-only memories_history.html")
         sys.exit(1)
     
     # Check if --process-only is the first argument
@@ -912,8 +1005,8 @@ def main():
     if sys.argv[1] == '--process-only':
         process_only = True
         if len(sys.argv) < 3:
-            print("Error: --process-only requires a metadata JSON file or HTML file")
-            print("Usage: python3 process_memories_v2.py --process-only <metadata_file_or_html>")
+            logger.error(f"Error: --process-only requires a metadata JSON file or HTML file")
+            logger.info("Usage: python3 process_memories_v2.py --process-only <metadata_file_or_html>")
             sys.exit(1)
         
         input_file = sys.argv[2]
@@ -934,19 +1027,19 @@ def main():
             
             # Extract metadata from JSON if needed
             if not os.path.exists(metadata_json):
-                print("=" * 80)
-                print("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
-                print("=" * 80)
-                print(f"Metadata file '{metadata_json}' not found.")
-                print(f"Extracting metadata from JSON file: {json_input_file}")
-                print("=" * 80)
+                logger.info("=" * 80)
+                logger.info("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
+                logger.info("=" * 80)
+                logger.info(f"Metadata file '{metadata_json}' not found.")
+                logger.info(f"Extracting metadata from JSON file: {json_input_file}")
+                logger.info("=" * 80)
                 
                 metadata = extract_metadata_from_json(json_input_file, metadata_json)
                 if not metadata:
-                    print("Error: Failed to extract metadata from JSON")
+                    logger.error(f"Error: Failed to extract metadata from JSON")
                     sys.exit(1)
                 
-                print(f"\n✓ Metadata extracted and saved to: {metadata_json}")
+                logger.info(f"\n✓ Metadata extracted and saved to: {metadata_json}")
         elif input_file.endswith('.html'):
             html_file = input_file
             base_name = Path(html_file).stem
@@ -954,53 +1047,53 @@ def main():
             
             # Extract metadata from HTML if needed
             if not os.path.exists(metadata_json):
-                print("=" * 80)
-                print("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
-                print("=" * 80)
-                print(f"Metadata file '{metadata_json}' not found.")
-                print(f"Extracting metadata from HTML file: {html_file}")
-                print("=" * 80)
+                logger.info("=" * 80)
+                logger.info("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
+                logger.info("=" * 80)
+                logger.info(f"Metadata file '{metadata_json}' not found.")
+                logger.info(f"Extracting metadata from HTML file: {html_file}")
+                logger.info("=" * 80)
                 
                 metadata = extract_metadata_from_html(html_file, metadata_json)
                 if not metadata:
-                    print("Error: Failed to extract metadata from HTML")
+                    logger.error(f"Error: Failed to extract metadata from HTML")
                     sys.exit(1)
                 
-                print(f"\n✓ Metadata extracted and saved to: {metadata_json}")
+                logger.info(f"\n✓ Metadata extracted and saved to: {metadata_json}")
         else:
-            print(f"Error: Input file must be .json, .html, or *_metadata.json, got: {input_file}")
+            logger.error(f"Error: Input file must be .json, .html, or *_metadata.json, got: {input_file}")
             sys.exit(1)
         
         # Verify metadata file exists
         if not os.path.exists(metadata_json):
-            print(f"Error: Metadata file '{metadata_json}' not found!")
+            logger.error(f"Error: Metadata file '{metadata_json}' not found!")
             sys.exit(1)
         
         download_folder = f"./{base_name}_downloads"
         output_folder = f"./{base_name}_processed"
         
-        print("=" * 80)
-        print("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
-        print("=" * 80)
-        print(f"Metadata file: {metadata_json}")
-        print(f"Download folder: {download_folder}")
-        print(f"Output folder: {output_folder}")
+        logger.info("=" * 80)
+        logger.info("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
+        logger.info("=" * 80)
+        logger.info(f"Metadata file: {metadata_json}")
+        logger.info(f"Download folder: {download_folder}")
+        logger.info(f"Output folder: {output_folder}")
         
         if not os.path.exists(download_folder):
-            print(f"\n⚠️  Error: Download folder '{download_folder}' not found!")
-            print(f"Please ensure files have been downloaded first.")
+            logger.warning(f"\n⚠️  Error: Download folder '{download_folder}' not found!")
+            logger.info(f"Please ensure files have been downloaded first.")
             sys.exit(1)
         
         # PHASE 3: Process and apply metadata
         processor = MemoryProcessor(metadata_json, download_folder, output_folder)
         processor.process_all()
         
-        print("\n" + "=" * 80)
-        print("✅ PROCESSING COMPLETE!")
-        print("=" * 80)
-        print(f"Metadata: {metadata_json}")
-        print(f"Downloads: {download_folder}")
-        print(f"Processed files: {output_folder}")
+        logger.info("\n" + "=" * 80)
+        logger.info("✅ PROCESSING COMPLETE!")
+        logger.info("=" * 80)
+        logger.info(f"Metadata: {metadata_json}")
+        logger.info(f"Downloads: {download_folder}")
+        logger.info(f"Processed files: {output_folder}")
         return
     
     # Normal flow - input file required (HTML or JSON)
@@ -1021,7 +1114,7 @@ def main():
                 delay = float(sys.argv[i + 1])
                 i += 2
             else:
-                print("Error: --delay requires a value")
+                logger.error(f"Error: --delay requires a value")
                 sys.exit(1)
         else:
             # Support legacy usage: second argument is delay
@@ -1029,11 +1122,11 @@ def main():
                 delay = float(arg)
                 i += 1
             except ValueError:
-                print(f"Error: Unknown argument '{arg}'")
+                logger.error(f"Error: Unknown argument '{arg}'")
                 sys.exit(1)
     
     if not os.path.exists(input_file):
-        print(f"Error: File '{input_file}' not found!")
+        logger.error(f"Error: File '{input_file}' not found!")
         sys.exit(1)
     
     # Determine input type and setup
@@ -1048,8 +1141,8 @@ def main():
         base_name = Path(input_file).stem
         extract_function = extract_metadata_from_html
     else:
-        print(f"Error: Input file must be .html or .json (not *_metadata.json), got: {input_file}")
-        print("For processed metadata files, use --process-only mode")
+        logger.error(f"Error: Input file must be .html or .json (not *_metadata.json), got: {input_file}")
+        logger.info("For processed metadata files, use --process-only mode")
         sys.exit(1)
     
     # Setup folders
@@ -1057,18 +1150,18 @@ def main():
     output_folder = f"./{base_name}_processed"
     metadata_json = f"./{base_name}_metadata.json"
     
-    print("=" * 80)
-    print("SNAPCHAT MEMORIES PROCESSOR V2")
-    print("=" * 80)
-    print(f"Input file ({input_type}): {input_file}")
-    print(f"Metadata file: {metadata_json}")
+    logger.info("=" * 80)
+    logger.info("SNAPCHAT MEMORIES PROCESSOR V2")
+    logger.info("=" * 80)
+    logger.info(f"Input file ({input_type}): {input_file}")
+    logger.info(f"Metadata file: {metadata_json}")
     
     if dry_run:
-        print(f"Mode: DRY RUN (metadata extraction only)")
+        logger.info(f"Mode: DRY RUN (metadata extraction only)")
     else:
-        print(f"Download folder: {download_folder}")
-        print(f"Output folder: {output_folder}")
-        print(f"Delay: {delay}s between downloads")
+        logger.info(f"Download folder: {download_folder}")
+        logger.info(f"Output folder: {output_folder}")
+        logger.info(f"Delay: {delay}s between downloads")
     
     # PHASE 1: Extract metadata from input file
     metadata = extract_function(input_file, metadata_json)
@@ -1077,17 +1170,17 @@ def main():
     
     # Exit early if dry-run
     if dry_run:
-        print("\n" + "=" * 80)
-        print("✅ DRY RUN COMPLETE - METADATA EXTRACTED")
-        print("=" * 80)
-        print(f"📄 Metadata saved to: {metadata_json}")
-        print(f"\nTo download and process, run:")
-        print(f"  python3 process_memories.py {input_file}")
-        print(f"\nTo process already downloaded files, run:")
-        print(f"  python3 process_memories.py --process-only {metadata_json}")
-        print("\nTo preview metadata:")
-        print(f"  cat {metadata_json} | jq '.memories[0]'")
-        print(f"  python3 -c \"import json; print(json.dumps(json.load(open('{metadata_json}'))['memories'][0], indent=2))\"")
+        logger.info("\n" + "=" * 80)
+        logger.info("✅ DRY RUN COMPLETE - METADATA EXTRACTED")
+        logger.info("=" * 80)
+        logger.info(f"📄 Metadata saved to: {metadata_json}")
+        logger.info(f"\nTo download and process, run:")
+        logger.info(f"  python3 process_memories.py {input_file}")
+        logger.info(f"\nTo process already downloaded files, run:")
+        logger.info(f"  python3 process_memories.py --process-only {metadata_json}")
+        logger.info("\nTo preview metadata:")
+        logger.info(f"  cat {metadata_json} | jq '.memories[0]'")
+        logger.info(f"  python3 -c \"import json; logger.info(json.dumps(json.load(open('{metadata_json}'))['memories'][0], indent=2))\"")
         sys.exit(0)
     
     # PHASE 2: Download files
@@ -1095,19 +1188,19 @@ def main():
     success, failed = downloader.download_all()
     
     if success == 0:
-        print("\n⚠️  No files downloaded. Exiting.")
+        logger.warning("\n⚠️  No files downloaded. Exiting.")
         sys.exit(1)
     
     # PHASE 3: Process and apply metadata
     processor = MemoryProcessor(metadata_json, download_folder, output_folder)
     processor.process_all()
     
-    print("\n" + "=" * 80)
-    print("✅ ALL PHASES COMPLETE!")
-    print("=" * 80)
-    print(f"Metadata: {metadata_json}")
-    print(f"Downloads: {download_folder}")
-    print(f"Processed files: {output_folder}")
+    logger.info("\n" + "=" * 80)
+    logger.info("✅ ALL PHASES COMPLETE!")
+    logger.info("=" * 80)
+    logger.info(f"Metadata: {metadata_json}")
+    logger.info(f"Downloads: {download_folder}")
+    logger.info(f"Processed files: {output_folder}")
 
 
 if __name__ == '__main__':
