@@ -96,6 +96,172 @@ class MemoryHTMLParser(HTMLParser):
                         pass
 
 
+def extract_metadata_from_json(json_file, output_json):
+    """
+    PHASE 1: Extract all metadata from JSON and save to standardized JSON
+    This preserves metadata even if download/processing fails
+    """
+    print("\n" + "=" * 80)
+    print("PHASE 1: EXTRACTING METADATA FROM JSON")
+    print("=" * 80)
+    
+    with open(json_file, 'r', encoding='utf-8') as f:
+        raw_data = json.load(f)
+    
+    if not isinstance(raw_data, list):
+        print("❌ JSON file must contain an array of memory objects!")
+        return None
+    
+    if not raw_data:
+        print("❌ No memories found in JSON file!")
+        return None
+    
+    memories = []
+    for item in raw_data:
+        memory = {}
+        
+        # Parse date (format: "2024-07-01 23:13:15 UTC")
+        date_str = item.get('Date', '')
+        if date_str:
+            try:
+                # Convert "2024-07-01 23:13:15 UTC" to ISO format
+                dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S UTC')
+                memory['date_utc'] = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                memory['date_key'] = dt.strftime('%Y-%m-%d_%H-%M-%S')
+            except ValueError:
+                print(f"⚠️  Could not parse date: {date_str}")
+                continue
+        else:
+            continue
+        
+        # Parse media type
+        media_type = item.get('Media Type', '').strip()
+        memory['media_type'] = media_type
+        
+        # Parse location
+        location_str = item.get('Location', '')
+        memory['location'] = {'latitude': 0.0, 'longitude': 0.0, 'valid': False}
+        if location_str:
+            location_match = re.search(r'Latitude,\s*Longitude:\s*([-\d.]+),\s*([-\d.]+)', location_str)
+            if location_match:
+                try:
+                    latitude = float(location_match.group(1))
+                    longitude = float(location_match.group(2))
+                    memory['location'] = {
+                        'latitude': round(latitude, 6),
+                        'longitude': round(longitude, 6),
+                        'valid': (latitude, longitude) != (0.0, 0.0)
+                    }
+                except ValueError:
+                    pass
+        
+        # Parse download URL - prefer Media Download Url (direct) over Download Link (proxy)
+        url = item.get('Media Download Url', '') or item.get('Download Link', '')
+        if url:
+            memory['url'] = url
+            # Media Download Url is direct (is_get_request=True), Download Link uses proxy (is_get_request=False)
+            memory['is_get_request'] = 'Media Download Url' in item and bool(item.get('Media Download Url', ''))
+        else:
+            continue
+        
+        memories.append(memory)
+    
+    if not memories:
+        print("❌ No valid memories found in JSON file!")
+        return None
+    
+    print(f"✓ Found {len(memories)} memories")
+    
+    # Enrich with filenames (same as HTML version)
+    for i, memory in enumerate(memories, 1):
+        date_key = memory.get('date_key', f'unknown_{i:04d}')
+        media_type = memory.get('media_type', 'unknown').lower()
+        
+        # Generate filename
+        has_gps = memory.get('location', {}).get('valid', False)
+        if has_gps:
+            filename = f"{date_key}_{media_type}_{i:04d}_gps"
+        else:
+            filename = f"{date_key}_{media_type}_{i:04d}"
+        
+        memory['index'] = i
+        memory['filename'] = filename
+        
+        # Print summary
+        location = memory.get('location', {})
+        if location.get('valid'):
+            loc_str = f"GPS: {location['latitude']:.4f}, {location['longitude']:.4f}"
+        else:
+            loc_str = "No GPS (0.0, 0.0)"
+        
+        print(f"  [{i:3d}] {memory['date_key']} | {media_type:5s} | {loc_str}")
+    
+    # Save to JSON (same format as HTML version)
+    metadata = {
+        'extracted_at': datetime.now().isoformat(),
+        'source_json': str(json_file),
+        'total_memories': len(memories),
+        'memories': memories
+    }
+    
+    with open(output_json, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    print(f"\n✓ Metadata saved to: {output_json}")
+    
+    # Calculate statistics (same as HTML version)
+    total = len(memories)
+    with_gps = sum(1 for m in memories if m.get('location', {}).get('valid', False))
+    without_gps = total - with_gps
+    videos = sum(1 for m in memories if m.get('media_type', '').lower() == 'video')
+    images = sum(1 for m in memories if m.get('media_type', '').lower() == 'image')
+    
+    # Group by date
+    from collections import defaultdict
+    dates = defaultdict(int)
+    for m in memories:
+        date_key = m.get('date_key', '')
+        if date_key:
+            date_only = date_key.split('_')[0]
+            dates[date_only] += 1
+    
+    # Find date range
+    date_keys = [m.get('date_key', '') for m in memories if 'date_key' in m]
+    if date_keys:
+        first_date = min(date_keys).split('_')[0]
+        last_date = max(date_keys).split('_')[0]
+    else:
+        first_date = last_date = "Unknown"
+    
+    print("\n" + "=" * 80)
+    print("METADATA SUMMARY")
+    print("=" * 80)
+    print(f"📊 Total memories: {total}")
+    print(f"   └─ Videos: {videos}")
+    print(f"   └─ Images: {images}")
+    print()
+    print(f"📍 GPS Coverage:")
+    print(f"   └─ With GPS: {with_gps} ({with_gps/total*100:.1f}%)")
+    print(f"   └─ Without GPS (0.0, 0.0): {without_gps} ({without_gps/total*100:.1f}%)")
+    print()
+    print(f"📅 Date Range:")
+    print(f"   └─ First: {first_date}")
+    print(f"   └─ Last:  {last_date}")
+    print(f"   └─ Unique dates: {len(dates)}")
+    print()
+    
+    # Show top 5 dates with most memories
+    if dates:
+        top_dates = sorted(dates.items(), key=lambda x: x[1], reverse=True)[:5]
+        print(f"📈 Most active dates:")
+        for date, count in top_dates:
+            print(f"   └─ {date}: {count} memories")
+    
+    print("\n" + "=" * 80)
+    
+    return metadata
+
+
 def extract_metadata_from_html(html_file, output_json):
     """
     PHASE 1: Extract all metadata from HTML and save to JSON
@@ -715,24 +881,30 @@ class MemoryProcessor:
 def main():
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python3 process_memories_v2.py <html_file> [options]")
-        print("  python3 process_memories_v2.py --process-only [metadata_file]")
+        print("  python3 process_memories.py <input_file> [options]")
+        print("  python3 process_memories.py --process-only [metadata_file]")
+        print("\nInput file can be:")
+        print("  - memories_history.html (HTML format from Snapchat)")
+        print("  - memories_history.json (JSON format from Snapchat)")
         print("\nOptions:")
         print("  --dry-run           Extract metadata only (no download/processing)")
         print("  --process-only      Process already downloaded files (skip download)")
         print("  --delay SECONDS     Delay between downloads (default: 2)")
         print("\nExamples:")
-        print("  # Dry run - extract metadata only:")
-        print("  python3 process_memories_v2.py memories_history.html --dry-run")
+        print("  # Dry run - extract metadata only from HTML:")
+        print("  python3 process_memories.py memories_history.html --dry-run")
+        print()
+        print("  # Dry run - extract metadata only from JSON:")
+        print("  python3 process_memories.py memories_history.json --dry-run")
         print()
         print("  # Full run with 3 second delay:")
-        print("  python3 process_memories_v2.py memories_history.html --delay 3")
+        print("  python3 process_memories.py memories_history.html --delay 3")
         print()
         print("  # Process-only (skip download, use existing files):")
-        print("  python3 process_memories_v2.py --process-only memories_history_metadata.json")
+        print("  python3 process_memories.py --process-only memories_history_metadata.json")
         print()
-        print("  # Process-only (auto-detect metadata file from html file):")
-        print("  python3 process_memories_v2.py --process-only memories_history.html")
+        print("  # Process-only (auto-detect metadata file from input file):")
+        print("  python3 process_memories.py --process-only memories_history.html")
         sys.exit(1)
     
     # Check if --process-only is the first argument
@@ -749,22 +921,39 @@ def main():
         metadata_json = None
         base_name = None
         
-        # Determine if it's an HTML file or metadata JSON
-        if input_file.endswith('.json'):
+        # Determine if it's an HTML file, JSON input, or processed metadata JSON
+        if input_file.endswith('_metadata.json'):
+            # This is an already-processed metadata file
             metadata_json = input_file
-            # Try to infer base name from metadata file
             base_name = Path(metadata_json).stem.replace('_metadata', '')
+        elif input_file.endswith('.json'):
+            # This is a raw JSON input file (memories_history.json)
+            json_input_file = input_file
+            base_name = Path(json_input_file).stem.replace('_metadata', '')
+            metadata_json = f"./{base_name}_metadata.json"
+            
+            # Extract metadata from JSON if needed
+            if not os.path.exists(metadata_json):
+                print("=" * 80)
+                print("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
+                print("=" * 80)
+                print(f"Metadata file '{metadata_json}' not found.")
+                print(f"Extracting metadata from JSON file: {json_input_file}")
+                print("=" * 80)
+                
+                metadata = extract_metadata_from_json(json_input_file, metadata_json)
+                if not metadata:
+                    print("Error: Failed to extract metadata from JSON")
+                    sys.exit(1)
+                
+                print(f"\n✓ Metadata extracted and saved to: {metadata_json}")
         elif input_file.endswith('.html'):
             html_file = input_file
             base_name = Path(html_file).stem
             metadata_json = f"./{base_name}_metadata.json"
-        else:
-            print(f"Error: Input file must be .json or .html, got: {input_file}")
-            sys.exit(1)
-        
-        # If metadata JSON doesn't exist, try to create it from HTML
-        if not os.path.exists(metadata_json):
-            if html_file and os.path.exists(html_file):
+            
+            # Extract metadata from HTML if needed
+            if not os.path.exists(metadata_json):
                 print("=" * 80)
                 print("SNAPCHAT MEMORIES PROCESSOR V2 - PROCESS ONLY MODE")
                 print("=" * 80)
@@ -772,20 +961,20 @@ def main():
                 print(f"Extracting metadata from HTML file: {html_file}")
                 print("=" * 80)
                 
-                # PHASE 1: Extract metadata from HTML
                 metadata = extract_metadata_from_html(html_file, metadata_json)
                 if not metadata:
                     print("Error: Failed to extract metadata from HTML")
                     sys.exit(1)
                 
                 print(f"\n✓ Metadata extracted and saved to: {metadata_json}")
-            else:
-                print(f"Error: Metadata file '{metadata_json}' not found!")
-                if html_file:
-                    print(f"HTML file '{html_file}' also not found!")
-                else:
-                    print(f"Please provide an HTML file to extract metadata from, or ensure the metadata file exists.")
-                sys.exit(1)
+        else:
+            print(f"Error: Input file must be .json, .html, or *_metadata.json, got: {input_file}")
+            sys.exit(1)
+        
+        # Verify metadata file exists
+        if not os.path.exists(metadata_json):
+            print(f"Error: Metadata file '{metadata_json}' not found!")
+            sys.exit(1)
         
         download_folder = f"./{base_name}_downloads"
         output_folder = f"./{base_name}_processed"
@@ -814,8 +1003,8 @@ def main():
         print(f"Processed files: {output_folder}")
         return
     
-    # Normal flow - HTML file required
-    html_file = sys.argv[1]
+    # Normal flow - input file required (HTML or JSON)
+    input_file = sys.argv[1]
     
     # Parse arguments
     dry_run = False
@@ -843,12 +1032,27 @@ def main():
                 print(f"Error: Unknown argument '{arg}'")
                 sys.exit(1)
     
-    if not os.path.exists(html_file):
-        print(f"Error: File '{html_file}' not found!")
+    if not os.path.exists(input_file):
+        print(f"Error: File '{input_file}' not found!")
+        sys.exit(1)
+    
+    # Determine input type and setup
+    if input_file.endswith('.json') and not input_file.endswith('_metadata.json'):
+        # Raw JSON input file
+        input_type = "JSON"
+        base_name = Path(input_file).stem.replace('_metadata', '')
+        extract_function = extract_metadata_from_json
+    elif input_file.endswith('.html'):
+        # HTML input file
+        input_type = "HTML"
+        base_name = Path(input_file).stem
+        extract_function = extract_metadata_from_html
+    else:
+        print(f"Error: Input file must be .html or .json (not *_metadata.json), got: {input_file}")
+        print("For processed metadata files, use --process-only mode")
         sys.exit(1)
     
     # Setup folders
-    base_name = Path(html_file).stem
     download_folder = f"./{base_name}_downloads"
     output_folder = f"./{base_name}_processed"
     metadata_json = f"./{base_name}_metadata.json"
@@ -856,7 +1060,7 @@ def main():
     print("=" * 80)
     print("SNAPCHAT MEMORIES PROCESSOR V2")
     print("=" * 80)
-    print(f"HTML file: {html_file}")
+    print(f"Input file ({input_type}): {input_file}")
     print(f"Metadata file: {metadata_json}")
     
     if dry_run:
@@ -866,8 +1070,8 @@ def main():
         print(f"Output folder: {output_folder}")
         print(f"Delay: {delay}s between downloads")
     
-    # PHASE 1: Extract metadata from HTML
-    metadata = extract_metadata_from_html(html_file, metadata_json)
+    # PHASE 1: Extract metadata from input file
+    metadata = extract_function(input_file, metadata_json)
     if not metadata:
         sys.exit(1)
     
@@ -878,9 +1082,9 @@ def main():
         print("=" * 80)
         print(f"📄 Metadata saved to: {metadata_json}")
         print(f"\nTo download and process, run:")
-        print(f"  python3 process_memories_v2.py {html_file}")
+        print(f"  python3 process_memories.py {input_file}")
         print(f"\nTo process already downloaded files, run:")
-        print(f"  python3 process_memories_v2.py --process-only {metadata_json}")
+        print(f"  python3 process_memories.py --process-only {metadata_json}")
         print("\nTo preview metadata:")
         print(f"  cat {metadata_json} | jq '.memories[0]'")
         print(f"  python3 -c \"import json; print(json.dumps(json.load(open('{metadata_json}'))['memories'][0], indent=2))\"")

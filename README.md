@@ -29,15 +29,28 @@ sudo apt-get install ffmpeg
 
 ### 1. Dry Run - Preview Metadata Only
 
-Extract metadata from HTML without downloading anything:
+Extract metadata from HTML or JSON without downloading anything:
 
 ```bash
+# From HTML file
 python3 process_memories.py memories_history.html --dry-run
+
+# From JSON file
+python3 process_memories.py memories_history.json --dry-run
 ```
 
-**Output:**
+**Output (HTML):**
 ```
 PHASE 1: EXTRACTING METADATA FROM HTML
+✓ Found 32 memories
+  [  1] 2026-01-06_09-29-56 | video | GPS: 45.4614, -122.8022
+  [  2] 2026-01-04_18-50-24 | video | GPS: 45.4614, -122.8021
+  ...
+```
+
+**Output (JSON):**
+```
+PHASE 1: EXTRACTING METADATA FROM JSON
 ✓ Found 32 memories
   [  1] 2026-01-06_09-29-56 | video | GPS: 45.4614, -122.8022
   [  2] 2026-01-04_18-50-24 | video | GPS: 45.4614, -122.8021
@@ -66,11 +79,15 @@ METADATA SUMMARY
 Download files, apply overlays, and embed metadata:
 
 ```bash
-# With default 2-second delay
+# From HTML file with default 2-second delay
 python3 process_memories.py memories_history.html
+
+# From JSON file with default 2-second delay
+python3 process_memories.py memories_history.json
 
 # With custom delay (recommended for slow connections)
 python3 process_memories.py memories_history.html --delay 3
+python3 process_memories.py memories_history.json --delay 3
 ```
 
 ### 3. Process-Only Mode
@@ -78,8 +95,9 @@ python3 process_memories.py memories_history.html --delay 3
 If you've already downloaded files and just need to reprocess them:
 
 ```bash
-# Process already downloaded files (auto-detects metadata from HTML filename)
+# Process already downloaded files (auto-detects metadata from input filename)
 python3 process_memories.py --process-only memories_history.html
+python3 process_memories.py --process-only memories_history.json
 
 # Or specify the metadata JSON directly
 python3 process_memories.py --process-only memories_history_metadata.json
@@ -94,7 +112,7 @@ View the extracted metadata JSON:
 python3 -c "import json; data = json.load(open('memories_history_metadata.json')); print(json.dumps(data['memories'][0], indent=2))"
 
 # View summary stats (requires jq)
-cat memories_history_metadata.json | jq '{total: .total_memories, extracted: .extracted_at, source: .source_html}'
+cat memories_history_metadata.json | jq '{total: .total_memories, extracted: .extracted_at, source: (.source_html // .source_json)}'
 
 # Count memories with GPS
 python3 -c "import json; data = json.load(open('memories_history_metadata.json')); valid_gps = sum(1 for m in data['memories'] if m.get('location', {}).get('valid', False)); print(f'Memories with GPS: {valid_gps}/{data[\"total_memories\"]}')"
@@ -106,7 +124,8 @@ After running the processor:
 
 ```
 .
-├── memories_history.html              # Input HTML file
+├── memories_history.html              # Input HTML file (or .json)
+├── memories_history.json              # Alternative: Input JSON file
 ├── memories_history_metadata.json     # Extracted metadata (Phase 1)
 ├── memories_history_downloads/        # Downloaded files (Phase 2)
 │   ├── .download_progress.json        # Resume tracking
@@ -119,13 +138,17 @@ After running the processor:
     └── 2025-12-31_00-57-04_image_0011_gps.jpg  ← Overlay + GPS + date
 ```
 
+**Note:** The processor supports both `memories_history.html` and `memories_history.json` as input files. Both produce the same output format.
+
 ## 🎯 Common Workflows
 
 ### Workflow 1: Preview Before Download
 
 ```bash
-# 1. Preview what you'll get
+# 1. Preview what you'll get (works with both HTML and JSON)
 python3 process_memories.py memories_history.html --dry-run
+# OR
+python3 process_memories.py memories_history.json --dry-run
 
 # 2. Review the metadata JSON
 python3 -c "import json; data = json.load(open('memories_history_metadata.json')); print(f\"Total: {data['total_memories']}, GPS: {sum(1 for m in data['memories'] if m.get('location', {}).get('valid', False))}\")"
@@ -135,13 +158,17 @@ python3 -c "import json; data = json.load(open('memories_history_metadata.json')
 
 # 4. If satisfied, proceed with download
 python3 process_memories.py memories_history.html
+# OR
+python3 process_memories.py memories_history.json
 ```
 
 ### Workflow 2: Resume Interrupted Download
 
 ```bash
-# If download was interrupted, just run again
+# If download was interrupted, just run again (works with both HTML and JSON)
 python3 process_memories.py memories_history.html
+# OR
+python3 process_memories.py memories_history.json
 
 # The script will:
 # - Re-extract metadata (updates existing JSON)
@@ -250,20 +277,25 @@ exiftool memories_history_processed/2026-01-06_09-29-56_video_0001_gps.mp4
 ### process_memories.py
 
 ```bash
-# Dry run - metadata only
-python3 process_memories.py <html_file> --dry-run
+# Dry run - metadata only (works with HTML or JSON)
+python3 process_memories.py <input_file> --dry-run
+python3 process_memories.py memories_history.html --dry-run
+python3 process_memories.py memories_history.json --dry-run
 
 # Full run with default delay (2s)
-python3 process_memories.py <html_file>
+python3 process_memories.py <input_file>
+python3 process_memories.py memories_history.html
+python3 process_memories.py memories_history.json
 
 # Full run with custom delay
-python3 process_memories.py <html_file> --delay 3
+python3 process_memories.py <input_file> --delay 3
 
 # Legacy format still supported (delay as second argument)
-python3 process_memories.py <html_file> 3
+python3 process_memories.py <input_file> 3
 
 # Process-only mode (skip download, process existing files)
 python3 process_memories.py --process-only <html_file>
+python3 process_memories.py --process-only <json_file>
 python3 process_memories.py --process-only <metadata_json>
 ```
 
